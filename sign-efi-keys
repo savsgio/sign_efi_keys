@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+# VERY IMPORTANT! After each kernel update or dkms reibuild the modules must be signed again with the script
+
+# Check if the /root/.ssl folder exists, but creates and keys are mades
+if [[ ! -d /root/.ssl ]]
+then
+    mkdir /root/.ssl
+    cd /root/.ssl
+    
+    # Generate custom keys with openssl
+    openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes  -subj "/CN=MokSign/"
+    
+    # Set more restrictive permisions as these are private keys
+    chmod 600 MOK.*
+    
+else
+    cd /root/.ssl
+fi
+ 
+# Sign the following modules
+printf "Signing the following modules...\n\n"
+
+for kernel in /lib/modules/*-generic
+do
+    RELEASE=$(basename ${kernel})
+    for module in ${kernel}/updates/dkms/*.ko
+    do
+        if [[ -f $module ]]
+        then
+            if strings $module | fgrep -q 'Module signature appended'
+            then
+                printf "Module $module is already signed\n\n"
+            else
+		read -p "Do you want to sign \"$module\" (y/n) --> " sign
+		
+		if [[ "$sign" == "y" ]]
+		then
+	                printf "Signing $module\n\n"
+        	        /usr/src/linux-headers-${RELEASE}/scripts/sign-file sha256 /root/.ssl/MOK.priv /root/.ssl/MOK.der $module
+		else
+			printf "Skipping...\n\n"
+		fi
+            fi
+        fi
+    done
+done
+
+#Add the key to the trusted keys database
+sudo mokutil --import ~/.ssl/MOK.der
+
+cd ~
+#Reboot and in the boot screen select add/import key 
